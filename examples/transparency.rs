@@ -4,11 +4,11 @@ use bevy::{
     pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
     render::{
+        RenderPlugin,
         mesh::{Indices, MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues},
         render_asset::RenderAssetUsages,
         render_resource::VertexFormat,
         settings::{RenderCreation, WgpuFeatures, WgpuSettings},
-        RenderPlugin,
     },
 };
 use binary_greedy_meshing as bgm;
@@ -127,12 +127,10 @@ fn generate_meshes() -> [Mesh; 3] {
         let face: bgm::Face = (face_n as u8).into();
         let n = face.n();
         for &quad in quads {
-            let voxel_i = (quad >> 32) as usize - 1;
+            let voxel_i = quad.voxel_id() as usize - 1;
             let vertices_packed = face.vertices_packed(quad);
-            for &vertex_packed in vertices_packed.iter() {
-                let x = vertex_packed & MASK6;
-                let y = (vertex_packed >> 6) & MASK6;
-                let z = (vertex_packed >> 12) & MASK6;
+            for &vertex in vertices_packed.iter() {
+                let [x, y, z] = vertex.xyz();
                 positions[voxel_i].push([x as f32, y as f32, z as f32]);
                 normals[voxel_i].push(n.clone());
             }
@@ -142,10 +140,7 @@ fn generate_meshes() -> [Mesh; 3] {
         indices[i] = bgm::indices(positions[i].len() / 4);
     }
     core::array::from_fn(|i| {
-        let mut mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::all(),
-        );
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::all());
         mesh.insert_attribute(
             Mesh::ATTRIBUTE_POSITION,
             VertexAttributeValues::Float32x3(positions[i].clone()),
