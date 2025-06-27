@@ -14,7 +14,6 @@ pub const CS_P3: usize = CS_P * CS_P * CS_P;
 const P_MASK: u64 = !(1 << 63 | 1);
 pub(crate) const MASK_6: u64 = 0b111111;
 
-
 #[derive(Debug)]
 pub struct Mesher {
     // Output
@@ -133,85 +132,6 @@ impl Mesher {
 
                     self.face_masks[front_faces] |= ((v1 != voxels[abc + 1]) as u64) << c;
                     self.face_masks[back_faces] |= ((v1 != voxels[abc - 1]) as u64) << c;
-                }
-            }
-        }
-    }
-
-    /// Generate quads directly from the current buffers.
-    pub fn face_generation(&mut self, voxels: &[u16]) {
-        // Non-greedy meshing faces 0-3
-        for face in 0..=3 {
-            let axis = face / 2;
-
-            for layer in 0..CS {
-                let bits_location = layer * CS + face * CS_2;
-
-                for forward in 0..CS {
-                    let mut bits_here = self.face_masks[forward + bits_location];
-                    if bits_here == 0 {
-                        continue;
-                    }
-
-                    while bits_here != 0 {
-                        let bit_pos = bits_here.trailing_zeros() as usize;
-                        bits_here &= !(1 << bit_pos);
-
-                        let v_type = voxels
-                            [get_axis_index(axis, forward + 1, bit_pos + 1, layer + 1)]
-                            as usize;
-
-                        let mesh_front = forward;
-                        let mesh_left = bit_pos;
-                        let mesh_up = layer + (!face & 1);
-
-                        let quad = match face {
-                            0 => Quad::pack(mesh_front, mesh_up, mesh_left, 1, 1, v_type),
-                            1 => Quad::pack(mesh_front + 1, mesh_up, mesh_left, 1, 1, v_type),
-                            2 => Quad::pack(mesh_up, mesh_front + 1, mesh_left, 1, 1, v_type),
-                            3 => Quad::pack(mesh_up, mesh_front, mesh_left, 1, 1, v_type),
-                            _ => unreachable!(),
-                        };
-                        self.quads[face].push(quad);
-                    }
-                }
-            }
-        }
-
-        // Non-greedy meshing faces 4-5
-        for face in 4..6 {
-            let axis = face / 2;
-
-            for forward in 0..CS {
-                let bits_location = forward * CS + face * CS_2;
-
-                for right in 0..CS {
-                    let mut bits_here = self.face_masks[right + bits_location];
-                    if bits_here == 0 {
-                        continue;
-                    }
-
-                    while bits_here != 0 {
-                        let bit_pos = bits_here.trailing_zeros() as usize;
-                        bits_here &= !(1 << bit_pos);
-
-                        let v_type =
-                            voxels[get_axis_index(axis, right + 1, forward + 1, bit_pos)] as usize;
-
-                        let mesh_left = right;
-                        let mesh_front = forward;
-                        let mesh_up = bit_pos + (!face & 1);
-
-                        let quad = Quad::pack(
-                            mesh_left + if face == 4 { 1 } else { 0 },
-                            mesh_front,
-                            mesh_up - 1,
-                            1,
-                            1,
-                            v_type,
-                        );
-                        self.quads[face].push(quad);
-                    }
                 }
             }
         }
@@ -448,11 +368,11 @@ impl Quad {
     /// y: 6 bits
     /// z: 6 bits 18
     /// width (w): 6 bits
-    /// height (h): 6 bits 
+    /// height (h): 6 bits
     /// voxel id (v): 32 bits
-    /// 
+    ///
     /// ao (a): 2 bits
-    /// 
+    ///
     /// layout:
     /// 0bvvvv_vvvv_vvvv_vvvv_vvvv_vvvv_vvvv_vvvv_00hh_hhhh_wwww_wwzz_zzzz_yyyy_yyxx_xxxx
     #[inline]
