@@ -17,7 +17,7 @@ pub(crate) const MASK_6: u64 = 0b111111;
 #[derive(Debug)]
 pub struct Mesher {
     // Output
-    pub quads: [Vec<u64>; 6],
+    pub quads: [Vec<Quad>; 6],
     // Internal buffers
     /// CS_2 * 6
     face_masks: Box<[u64]>,
@@ -48,7 +48,7 @@ impl Mesher {
         }
     }
 
-    fn face_culling(&mut self, voxels: &[u16], transparents: &BTreeSet<u16>) {
+    pub fn face_culling(&mut self, voxels: &[u16], transparents: &BTreeSet<u16>) {
         // Hidden face culling
         for a in 1..(CS_P - 1) {
             let a_cs_p = a * CS_P;
@@ -83,7 +83,7 @@ impl Mesher {
         }
     }
 
-    fn fast_face_culling(&mut self, voxels: &[u16], opaque_mask: &[u64], trans_mask: &[u64]) {
+    pub fn fast_face_culling(&mut self, voxels: &[u16], opaque_mask: &[u64], trans_mask: &[u64]) {
         // Hidden face culling
         for a in 1..(CS_P - 1) {
             let a_ = a * CS_P;
@@ -137,7 +137,87 @@ impl Mesher {
         }
     }
 
-    fn face_merging(&mut self, voxels: &[u16]) {
+    /// Generate quads directly from the current buffers.
+    pub fn face_generation(&mut self, voxels: &[u16]) {
+        // Non-greedy meshing faces 0-3
+        for face in 0..=3 {
+            let axis = face / 2;
+
+            for layer in 0..CS {
+                let bits_location = layer * CS + face * CS_2;
+
+                for forward in 0..CS {
+                    let mut bits_here = self.face_masks[forward + bits_location];
+                    if bits_here == 0 {
+                        continue;
+                    }
+
+                    while bits_here != 0 {
+                        let bit_pos = bits_here.trailing_zeros() as usize;
+                        bits_here &= !(1 << bit_pos);
+
+                        let v_type = voxels
+                            [get_axis_index(axis, forward + 1, bit_pos + 1, layer + 1)]
+                            as usize;
+
+                        let mesh_front = forward;
+                        let mesh_left = bit_pos;
+                        let mesh_up = layer + (!face & 1);
+
+                        let quad = match face {
+                            0 => Quad::pack(mesh_front, mesh_up, mesh_left, 1, 1, v_type),
+                            1 => Quad::pack(mesh_front + 1, mesh_up, mesh_left, 1, 1, v_type),
+                            2 => Quad::pack(mesh_up, mesh_front + 1, mesh_left, 1, 1, v_type),
+                            3 => Quad::pack(mesh_up, mesh_front, mesh_left, 1, 1, v_type),
+                            _ => unreachable!(),
+                        };
+                        self.quads[face].push(quad);
+                    }
+                }
+            }
+        }
+
+        // Non-greedy meshing faces 4-5
+        for face in 4..6 {
+            let axis = face / 2;
+
+            for forward in 0..CS {
+                let bits_location = forward * CS + face * CS_2;
+
+                for right in 0..CS {
+                    let mut bits_here = self.face_masks[right + bits_location];
+                    if bits_here == 0 {
+                        continue;
+                    }
+
+                    while bits_here != 0 {
+                        let bit_pos = bits_here.trailing_zeros() as usize;
+                        bits_here &= !(1 << bit_pos);
+
+                        let v_type =
+                            voxels[get_axis_index(axis, right + 1, forward + 1, bit_pos)] as usize;
+
+                        let mesh_left = right;
+                        let mesh_front = forward;
+                        let mesh_up = bit_pos + (!face & 1);
+
+                        let quad = Quad::pack(
+                            mesh_left + if face == 4 { 1 } else { 0 },
+                            mesh_front,
+                            mesh_up - 1,
+                            1,
+                            1,
+                            v_type,
+                        );
+                        self.quads[face].push(quad);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Merge faces and generate quads.
+    pub fn face_merging(&mut self, voxels: &[u16]) {
         // Greedy meshing faces 0-3
         for face in 0..=3 {
             let axis = face / 2;
@@ -200,7 +280,7 @@ impl Mesher {
                         let v_type = v_type as usize;
 
                         let quad = match face {
-                            0 => get_quad(
+                            0 => Quad::pack(
                                 mesh_front,
                                 mesh_up,
                                 mesh_left,
@@ -208,7 +288,7 @@ impl Mesher {
                                 mesh_width,
                                 v_type,
                             ),
-                            1 => get_quad(
+                            1 => Quad::pack(
                                 mesh_front + mesh_length as usize,
                                 mesh_up,
                                 mesh_left,
@@ -216,7 +296,7 @@ impl Mesher {
                                 mesh_width,
                                 v_type,
                             ),
-                            2 => get_quad(
+                            2 => Quad::pack(
                                 mesh_up,
                                 mesh_front + mesh_length as usize,
                                 mesh_left,
@@ -224,7 +304,7 @@ impl Mesher {
                                 mesh_width,
                                 v_type,
                             ),
-                            3 => get_quad(
+                            3 => Quad::pack(
                                 mesh_up,
                                 mesh_front,
                                 mesh_left,
@@ -305,7 +385,7 @@ impl Mesher {
                         self.forward_merged[forward_merge_i] = 0;
                         *right_merged_ref = 0;
 
-                        let quad = get_quad(
+                        let quad = Quad::pack(
                             mesh_left + (if face == 4 { mesh_width } else { 0 }) as usize,
                             mesh_front,
                             mesh_up,
@@ -336,6 +416,11 @@ impl Mesher {
         self.face_culling(voxels, transparents);
         self.face_merging(voxels);
     }
+
+    pub fn fast_mesh_no_merge(&mut self, voxels: &[u16], opaque_mask: &[u64], trans_mask: &[u64]) {
+        self.fast_face_culling(voxels, opaque_mask, trans_mask);
+        self.face_generation(voxels);
+    }
 }
 
 #[inline]
@@ -354,25 +439,77 @@ fn get_axis_index(axis: usize, a: usize, b: usize, c: usize) -> usize {
     }
 }
 
-#[inline]
-fn get_quad(x: usize, y: usize, z: usize, w: usize, h: usize, v_type: usize) -> u64 {
-    ((v_type << 32) | (h << 24) | (w << 18) | (z << 12) | (y << 6) | x) as u64
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Quad(pub u64);
+
+impl Quad {
+    /// x: 6 bits
+    /// y: 6 bits
+    /// z: 6 bits 18
+    /// width (w): 6 bits
+    /// height (h): 6 bits
+    /// voxel id (v): 32 bits
+    ///
+    /// ao (a): 2 bits
+    ///
+    /// layout:
+    /// 0bvvvv_vvvv_vvvv_vvvv_vvvv_vvvv_vvvv_vvvv_00hh_hhhh_wwww_wwzz_zzzz_yyyy_yyxx_xxxx
+    #[inline]
+    pub fn pack(x: usize, y: usize, z: usize, w: usize, h: usize, v_type: usize) -> Self {
+        Quad(((v_type << 32) | (h << 24) | (w << 18) | (z << 12) | (y << 6) | x) as u64)
+    }
+
+    #[inline]
+    pub fn xyz(&self) -> [u64; 3] {
+        let x = (self.0) & MASK_6;
+        let y = (self.0 >> 6) & MASK_6;
+        let z = (self.0 >> 12) & MASK_6;
+        [x, y, z]
+    }
+
+    #[inline]
+    pub fn width(&self) -> u64 {
+        (self.0 >> 18) & MASK_6
+    }
+
+    #[inline]
+    pub fn height(&self) -> u64 {
+        (self.0 >> 24) & MASK_6
+    }
+
+    #[inline]
+    pub fn voxel_id(&self) -> u64 {
+        self.0 >> 32
+    }
+
+    /// Unpacks quad data and formats it as "{x};{y};{z} {w}x{h} v={v_type}" for debugging
+    #[inline]
+    pub fn debug_quad(&self) -> String {
+        let mut quad = self.0;
+        let x = quad & MASK_6;
+        quad >>= 6;
+        let y = quad & MASK_6;
+        quad >>= 6;
+        let z = quad & MASK_6;
+        quad >>= 6;
+        let w = quad & MASK_6;
+        quad >>= 6;
+        let h = quad & MASK_6;
+        quad >>= 8;
+        let v_type = quad;
+        format!("{x};{y};{z} {w}x{h} v={v_type}")
+    }
 }
 
-/// Unpacks quad data and formats it as "{x};{y};{z} {w}x{h} v={v_type}" for debugging
-pub fn debug_quad(mut quad: u64) -> String {
-    let x = quad & MASK_6;
-    quad >>= 6;
-    let y = quad & MASK_6;
-    quad >>= 6;
-    let z = quad & MASK_6;
-    quad >>= 6;
-    let w = quad & MASK_6;
-    quad >>= 6;
-    let h = quad & MASK_6;
-    quad >>= 8;
-    let v_type = quad;
-    format!("{x};{y};{z} {w}x{h} v={v_type}")
+impl alloc::fmt::Debug for Quad {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Quad")
+            .field("position", &self.xyz())
+            .field("width", &self.width())
+            .field("height", &self.height())
+            .field("voxel_id", &self.voxel_id())
+            .finish()
+    }
 }
 
 /// Compute Mesh indices for a given amount of quads
@@ -427,7 +564,7 @@ pub fn compute_transparent_mask(voxels: &[u16], transparents: &BTreeSet<u16>) ->
 
 #[cfg(test)]
 mod tests {
-    use crate::{self as bgm, CS_P2, debug_quad};
+    use crate::{self as bgm, CS_P2};
     use alloc::{boxed::Box, collections::btree_set::BTreeSet};
 
     /// Show quad output on a simple 2 voxels case
@@ -446,7 +583,7 @@ mod tests {
         for (i, quads) in mesher.quads.iter().enumerate() {
             std::println!("--- Face {i} ---");
             for &quad in quads {
-                std::println!("{:?}", debug_quad(quad));
+                std::println!("{:?}", quad);
             }
         }
     }
