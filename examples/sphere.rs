@@ -76,12 +76,14 @@ fn setup(
     });
 }
 
+const CS: usize = 62;
+
 /// Generate 1 mesh per block type for simplicity, in practice we would use a texture array and a custom shader instead
 fn generate_mesh() -> Mesh {
     let voxels = voxel_buffer();
-    let mut mesher = bgm::Mesher::new();
-    let opaque_mask = bgm::compute_opaque_mask(&voxels, &BTreeSet::new());
-    let trans_mask = vec![0; bgm::CS_P2].into_boxed_slice();
+    let mut mesher = bgm::Mesher::<CS>::new();
+    let opaque_mask = bgm::compute_opaque_mask::<CS>(&voxels, &BTreeSet::new());
+    let trans_mask = vec![0; bgm::Mesher::<CS>::CS_P2].into_boxed_slice();
     mesher.fast_mesh(&voxels, &opaque_mask, &trans_mask);
     let mut positions = Vec::new();
     let mut normals = Vec::new();
@@ -120,12 +122,12 @@ fn generate_mesh() -> Mesh {
     mesh
 }
 
-fn voxel_buffer() -> [u16; bgm::CS_P3] {
-    let mut voxels = [0; bgm::CS_P3];
-    for x in 0..bgm::CS {
-        for y in 0..bgm::CS {
-            for z in 0..bgm::CS {
-                voxels[bgm::pad_linearize(x, y, z)] = sphere(x, y, z);
+fn voxel_buffer() -> [u16; bgm::Mesher::<CS>::CS_P3] {
+    let mut voxels = [0; bgm::Mesher::<CS>::CS_P3];
+    for x in 0..CS {
+        for y in 0..CS {
+            for z in 0..CS {
+                voxels[bgm::pad_linearize::<CS>(x, y, z)] = sphere(x, y, z);
             }
         }
     }
