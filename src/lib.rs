@@ -23,9 +23,8 @@ pub struct Mesher<const CS: usize> {
 }
 
 impl<const CS: usize> Mesher<CS> {
-    pub const CS: usize = 62;
-    pub const CS_2: usize = Self::CS * Self::CS;
-    pub const CS_P: usize = Self::CS + 2;
+    pub const CS_2: usize = CS * CS;
+    pub const CS_P: usize = CS + 2;
     pub const CS_P2: usize = Self::CS_P * Self::CS_P;
     pub const CS_P3: usize = Self::CS_P * Self::CS_P * Self::CS_P;
 
